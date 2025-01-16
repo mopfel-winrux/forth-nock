@@ -52,13 +52,12 @@ DEFER .NOUN  \ Forward declaration
 
 \ + operator (lus) - increment atom
 : lus ( addr -- addr )
-    .S
     dup is-cell? IF
         \ If cell, return as is
         dup
     ELSE
         \ If atom, increment value
-        dup get-value 1+ make-atom
+        get-value 1+ make-atom
     THEN ;
 
 \ = operator (tis) - equality test
@@ -154,14 +153,18 @@ DEFER tar  \ Forward declaration for recursion
 
 : nock-6 ( addr -- addr )  \ *[a 6 b c d] -> if *[a b] *[a c] else *[a d]
     over over get-tail get-tail get-head make-cell tar \ *[a b]
-    get-value 0 = IF
+    get-value 0 = IF \ TODO: add check for cell and crash
       get-tail get-tail get-tail get-head make-cell tar
     ELSE  
       get-tail get-tail get-tail get-tail make-cell tar
     THEN
     ;
 
-: nock-7 ( addr -- addr )  \ 
+: nock-7 ( addr -- addr )  \ *[a 7 b c] -> *[*[a b] c]
+    dup -rot
+    get-tail get-tail get-head make-cell tar \ *[a b]
+    swap
+    get-tail get-tail get-tail make-cell tar \ *[*[a b] c]
     ;
 
 : nock-8 ( addr -- addr )  \ 
@@ -340,6 +343,23 @@ DEFER tar  \ Forward declaration for recursion
     make-cell
     make-cell ;
 
+
+: test-comp \ [42 [7 [4 0 1] [4 0 1]]]
+    42 make-atom
+    7 make-atom
+    4 make-atom
+    0 make-atom
+    1 make-atom
+    make-cell
+    make-cell
+    4 make-atom
+    0 make-atom
+    1 make-atom
+    make-cell
+    make-cell
+    make-cell
+    make-cell
+    make-cell ;
 
 
 : eq
