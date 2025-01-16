@@ -147,8 +147,6 @@ DEFER tar  \ Forward declaration for recursion
     get-tail get-tail make-cell tar lus ;
 
 : nock-5 ( addr -- addr )  \ [a 5 b] -> =*[a b]
-    .S
-    .noun
     get-tail get-tail make-cell tar
     dup get-head
     swap get-tail
