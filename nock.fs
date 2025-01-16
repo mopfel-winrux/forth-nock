@@ -28,16 +28,16 @@ DEFER .NOUN  \ Forward declaration
 
 : print-noun ( addr -- )  \ Print a noun
     dup is-cell?    \ Check if cell
-    if             \ If cell
+    IF             \ If cell
         ." ["
-        dup get-head recurse  \ Print head
+        dup get-head RECURSE  \ Print head
         ." " 
-        get-tail recurse  \ Print tail
+        get-tail RECURSE  \ Print tail
         ." ]"
-    else           \ If atom
+    ELSE           \ If atom
         get-value    \ Get value
         .          \ Print it
-    then ;
+    THEN ;
 
 : .noun-with-dup ( addr -- addr )  \ Wrapper that ensures dup before printing
     dup print-noun ;
@@ -62,10 +62,35 @@ DEFER .NOUN  \ Forward declaration
     THEN ;
 
 \ = operator (tis) - equality test
-: tis ( addr addr -- n )
-    \ Recursive equality check would go here
-    \ For now just compare addresses
-    = IF 0 ELSE 1 THEN ;
+DEFER tis-impl  \ Forward declaration for recursion
+
+: do-tis ( addr1 addr2 -- n )
+    \ Check if both are cells or both are atoms
+    over is-cell? over is-cell? <> IF
+        2drop 1 EXIT  \ Different types, not equal
+    THEN
+
+    over is-cell? IF
+        \ Both are cells - compare heads and tails
+        \ Keep copies for tail comparison
+        2dup
+        \ Get and compare heads
+        2dup get-head swap get-head tis-impl
+        IF
+            \ If heads not equal, clean up and return 1
+            2drop 2drop 1 EXIT
+        THEN
+        \ Heads were equal, now check tails
+        get-tail swap get-tail tis-impl
+    ELSE
+        \ Both are atoms - compare values
+        get-value swap get-value = 0= IF 1 ELSE 0 THEN
+    THEN ;
+
+' do-tis IS tis-impl
+
+: tis ( addr1 addr2 -- n )
+    tis-impl ;
 
 \ / operator (slot) - tree addressing
 DEFER slot  \ Forward declaration for recursion
@@ -92,14 +117,22 @@ DEFER slot  \ Forward declaration for recursion
 \ * operator (tar) - main reduction engine
 DEFER tar  \ Forward declaration for recursion
 
-: nock-0 ( addr -- addr )  \ [a 0 b] → /[1 + b]a
+: autocons ( addr -- addr) \ *[a [b c] d] -> [*[a b c] *[a d]]
+    dup dup get-head swap
+    get-tail get-head make-cell tar swap
+    dup get-head swap
+    get-tail get-tail make-cell tar
+    make-cell ;
+
+
+: nock-0 ( addr -- addr )  \ [a 0 b] -> /[1 + b]a
     get-tail get-tail get-value swap slot ;
 
-: nock-1 ( addr -- addr )  \ [a 1 b] → b
+: nock-1 ( addr -- addr )  \ [a 1 b] -> b
     swap drop
     get-tail get-tail ;
 
-: nock-2 ( addr -- addr )  \ [a 2 b c] → *[*[a b] *[a c]]
+: nock-2 ( addr -- addr )  \ [a 2 b c] -> *[*[a b] *[a c]]
     dup get-tail get-tail get-head 
     >R swap R> make-cell tar swap
     dup get-head swap
@@ -107,35 +140,40 @@ DEFER tar  \ Forward declaration for recursion
     make-cell
     tar ;
 
-: nock-3 ( addr -- addr )  \ [a 3 b] → ?*[a b]
+: nock-3 ( addr -- addr )  \ [a 3 b] -> ?*[a b]
     get-tail get-tail make-cell tar wut make-atom ;
 
-: nock-4 ( addr -- addr )  \ [a 4 b] → +*[a b]
+: nock-4 ( addr -- addr )  \ [a 4 b] -> +*[a b]
     get-tail get-tail make-cell tar lus ;
 
-: nock-5 ( addr -- addr )  \ [a 5 b] → =*[a b]
-    \ TODO: Implement equals operation
-    dup ;
-
-: test-tar ( addr -- addr )
-    dup get-tail get-head get-value  \ Get operation number
-    swap dup get-head swap rot
-    ;
+: nock-5 ( addr -- addr )  \ [a 5 b] -> =*[a b]
+    .S
+    .noun
+    get-tail get-tail make-cell tar
+    dup get-head
+    swap get-tail
+    tis make-atom ;
 
 : do-tar ( addr -- addr )
-    dup get-tail get-head get-value  \ Get operation number
-    swap dup get-head swap rot
-    \ TODO: Check for Autocons
-    CASE
-        0 OF nock-0 ENDOF
-        1 OF nock-1 ENDOF
-        2 OF nock-2 ENDOF
-        3 OF nock-3 ENDOF
-        4 OF nock-4 ENDOF
-        5 OF nock-5 ENDOF
-        \ TODO: Add cases 6-10
-    ENDCASE 
-    cr .noun ;
+    dup get-tail get-head 
+    \ Check for Autocons
+    dup is-cell? IF
+        drop autocons
+    ELSE
+      get-value  \ Get operation number
+      swap dup get-head swap rot
+      CASE
+          0 OF nock-0 ENDOF
+          1 OF nock-1 ENDOF
+          2 OF nock-2 ENDOF
+          3 OF nock-3 ENDOF
+          4 OF nock-4 ENDOF
+          5 OF nock-5 ENDOF
+          \ TODO: Add cases 6-10
+      ENDCASE 
+    THEN
+    \ cr .noun
+    ;
 
 ' do-tar IS tar  \ Resolve the deferred word
 
@@ -177,6 +215,19 @@ DEFER tar  \ Forward declaration for recursion
     make-cell
     make-cell 
     make-cell ;
+
+: mk-equal \ Creates [5 [4 0 2] [0 3]]
+    5 make-atom
+    4 make-atom
+    0 make-atom
+    2 make-atom
+    make-cell make-cell
+    0 make-atom
+    3 make-atom
+    make-cell
+    make-cell
+    make-cell ;
+
 
 
 \ Creates [[4 5] [6 14 15]]
@@ -222,3 +273,34 @@ DEFER tar  \ Forward declaration for recursion
     mk-cell
     make-cell
     ;
+
+: test-equal
+    50 make-atom
+    51 make-atom
+    make-cell
+    mk-equal
+    make-cell
+    ;
+
+: test-auto \ [50 [[0 1] [1 203]]]
+    50 make-atom
+    0 make-atom
+    1 make-atom
+    make-cell
+    1 make-atom
+    203 make-atom 
+    make-cell
+    make-cell
+    make-cell
+    ;
+
+
+
+: eq
+    50 make-atom
+    51 make-atom
+    make-cell
+    50 make-atom
+    51 make-atom
+    make-cell ;
+
