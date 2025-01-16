@@ -152,6 +152,30 @@ DEFER tar  \ Forward declaration for recursion
     swap get-tail
     tis make-atom ;
 
+: nock-6 ( addr -- addr )  \ *[a 6 b c d] -> if *[a b] *[a c] else *[a d]
+    over over get-tail get-tail get-head make-cell tar \ *[a b]
+    get-value 0 = IF
+      get-tail get-tail get-tail get-head make-cell tar
+    ELSE  
+      get-tail get-tail get-tail get-tail make-cell tar
+    THEN
+    ;
+
+: nock-7 ( addr -- addr )  \ 
+    ;
+
+: nock-8 ( addr -- addr )  \ 
+    ;
+
+: nock-9 ( addr -- addr )  \ 
+    ;
+
+: nock-10 ( addr -- addr )  \ 
+    ;
+
+: nock-11 ( addr -- addr )  \ 
+    ;
+
 : do-tar ( addr -- addr )
     dup get-tail get-head 
     \ Check for Autocons
@@ -167,7 +191,12 @@ DEFER tar  \ Forward declaration for recursion
           3 OF nock-3 ENDOF
           4 OF nock-4 ENDOF
           5 OF nock-5 ENDOF
-          \ TODO: Add cases 6-10
+          6 OF nock-6 ENDOF
+          7 OF nock-7 ENDOF
+          8 OF nock-8 ENDOF
+          9 OF nock-9 ENDOF
+          10 OF nock-10 ENDOF
+          11 OF nock-11 ENDOF
       ENDCASE 
     THEN
     \ cr .noun
@@ -291,6 +320,25 @@ DEFER tar  \ Forward declaration for recursion
     make-cell
     make-cell
     ;
+
+: test-if \ [1 [6 [0 1] [0 1] [4 0 1]]]
+    1 make-atom
+    6 make-atom
+    0 make-atom
+    1 make-atom
+    make-cell
+    0 make-atom
+    1 make-atom
+    make-cell
+    4 make-atom
+    0 make-atom
+    1 make-atom
+    make-cell
+    make-cell
+    make-cell
+    make-cell
+    make-cell
+    make-cell ;
 
 
 
