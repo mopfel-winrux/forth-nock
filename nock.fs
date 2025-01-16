@@ -167,7 +167,12 @@ DEFER tar  \ Forward declaration for recursion
     get-tail get-tail get-tail make-cell tar \ *[*[a b] c]
     ;
 
-: nock-8 ( addr -- addr )  \ 
+: nock-8 ( addr -- addr )  \ *[a 8 b c] -> *[[*[a b] a] c]
+    dup -rot
+    get-tail get-tail get-head make-cell tar \ *[a b]
+    over get-head make-cell \ [*[a b] a]
+    swap get-tail get-tail get-tail
+    make-cell tar
     ;
 
 : nock-9 ( addr -- addr )  \ 
@@ -361,6 +366,21 @@ DEFER tar  \ Forward declaration for recursion
     make-cell
     make-cell ;
 
+: test-varadd \ [[67 39] [8 [0 3] [4 0 2]]]
+    67 make-atom
+    39 make-atom make-cell
+    8 make-atom
+    0 make-atom
+    3 make-atom
+    make-cell
+    4 make-atom
+    0 make-atom
+    2 make-atom
+    make-cell
+    make-cell
+    make-cell
+    make-cell
+    make-cell ;
 
 : eq
     50 make-atom
