@@ -5,6 +5,29 @@ Nock Interpreter written in Forth
 
 `noun-test.fs` are some tests written
 
+## Examples
+
+I'm using `gforth` but any forth interperter should work
+
+`$ gforth noun-test.fs`
+
+Lets run the nock formula `[50 [[0 1] [1 203]]]` defined in `test-auto`
+
+```
+test-auto  ok 1
+.noun [50 [[0 1 ][1 203 ]]] ok 1
+```
+
+`.noun` will display the noun at the top of the stack
+
+You can execute any noun using the `nock` procedure
+
+```
+nock  ok 1
+.noun [50 203 ] ok 1
+```
+
+
 ## Nock 4k Specification
 ```
 Nock 4K
