@@ -1,22 +1,3 @@
-\ Memory bounds checking utilities
-\ Maintains a record of allocated memory and provides validation
-
-VARIABLE mem-start  \ Start of our allocation space
-VARIABLE mem-end    \ End of our allocation space
-
-\ Initialize memory tracking
-: init-mem-bounds ( -- )
-    here mem-start !      \ Record starting point of our memory space
-    here 1000 cells +     \ Allocate reasonable buffer space
-    mem-end ! ;          \ Record ending point
-
-\ Check if address is within valid memory bounds
-: valid-addr? ( addr -- flag )
-    dup mem-start @ u>=   \ Check if address >= start
-    swap mem-end @ u<=    \ Check if address <= end
-    AND ;                \ Both conditions must be true
-
-
 \ Structure:
 \ First word: 0 for atom, 1 for cell
 \ Second word: For atoms: the value
@@ -94,14 +75,11 @@ DEFER tis-impl  \ Forward declaration for recursion
         2dup
         \ Get and compare heads
         2dup get-head swap get-head tis-impl
-        IF
-            \ If heads not equal, clean up and return 1
+        IF \ If heads not equal, clean up and return 1
             2drop 2drop 1 EXIT
-        THEN
-        \ Heads were equal, now check tails
+        THEN \ Heads were equal, now check tails
         get-tail swap get-tail tis-impl
-    ELSE
-        \ Both are atoms - compare values
+    ELSE \ Both are atoms - compare values
         get-value swap get-value = 0= IF 1 ELSE 0 THEN
     THEN ;
 
@@ -136,7 +114,6 @@ DEFER slot  \ Forward declaration for recursion
 DEFER hax  \ Forward declaration for recursion
 
 : do-hax ( n addr1 addr2 -- addr ) ( addr new-val target )
-    cr .S  cr
     -rot ( addr2 n addr1 )
     swap dup 1 = IF  \ Case #[1 a b]
         drop nip  \ Return just a
@@ -145,12 +122,8 @@ DEFER hax  \ Forward declaration for recursion
             2/ >R  \ Store a
             swap \ Get b on top
             dup
-            R@ 
-            2* 1+ 
+            R@ 2* 1+ 
             swap .noun slot  \ Calculate /[(a + a + 1) c]
-            dup valid-addr? INVERT IF
-                make-atom
-            THEN
             rot swap make-cell  \ Create [b /[(a + a + 1) c]]
             swap  \ Original c
             R>    \ Restore a
@@ -196,8 +169,7 @@ DEFER tar  \ Forward declaration for recursion
     >R swap R> make-cell tar swap
     dup get-head swap
     get-tail get-tail get-tail make-cell tar
-    make-cell
-    tar ;
+    make-cell tar ;
 
 : nock-3 ( addr -- addr )  \ [a 3 b] -> ?*[a b]
     get-tail get-tail make-cell tar wut make-atom ;
@@ -217,23 +189,20 @@ DEFER tar  \ Forward declaration for recursion
       get-tail get-tail get-tail get-head make-cell tar
     ELSE  
       get-tail get-tail get-tail get-tail make-cell tar
-    THEN
-    ;
+    THEN    ;
 
 : nock-7 ( addr -- addr )  \ *[a 7 b c] -> *[*[a b] c]
     dup -rot
     get-tail get-tail get-head make-cell tar \ *[a b]
     swap
-    get-tail get-tail get-tail make-cell tar \ *[*[a b] c]
-    ;
+    get-tail get-tail get-tail make-cell tar ; \ *[*[a b] c]
 
 : nock-8 ( addr -- addr )  \ *[a 8 b c] -> *[[*[a b] a] c]
     dup -rot
     get-tail get-tail get-head make-cell tar \ *[a b]
     over get-head make-cell \ [*[a b] a]
     swap get-tail get-tail get-tail
-    make-cell tar
-    ;
+    make-cell tar ;
 
 : nock-9 ( addr -- addr )  \ *[a 9 b c] -> *[*[a c] 2 [0 1] 0 b]
     dup -rot
@@ -258,16 +227,12 @@ DEFER tar  \ Forward declaration for recursion
     get-tail get-tail get-tail
     make-cell tar \ *[a d]
     R> R>  \ *[a d] *[a c] b 
-    get-value
-    -rot swap \ Stack: b *[a c] *[a d]
-    hax
-    ;
+    get-value -rot swap \ Stack: b *[a c] *[a d]
+    hax ; 
 
-: nock-11 ( addr -- addr )  \ 
-    \ Check if dynamic or static
+: nock-11 ( addr -- addr )
     dup get-tail get-tail get-head
-    is-cell? IF
-      \ Dynamic hint
+    is-cell? IF  \ Dynamic hint
       2dup
       get-tail get-tail get-head get-tail
       make-cell tar \ *[a c]
@@ -280,18 +245,14 @@ DEFER tar  \ Forward declaration for recursion
       make-cell
       make-cell
       tar
-    ELSE
-      \ Static hint
+    ELSE  \ Static hint
       get-tail get-tail get-tail
-      make-cell
-      tar
-    THEN
-    ;
+      make-cell tar
+    THEN ;
 
 : do-tar ( addr -- addr )
     dup get-tail get-head 
-    \ Check for Autocons
-    dup is-cell? IF
+    dup is-cell? IF  \ Check for Autocons
         drop autocons
     ELSE
       get-value  \ Get operation number
@@ -311,256 +272,9 @@ DEFER tar  \ Forward declaration for recursion
           11 OF nock-11 ENDOF
       ENDCASE 
     THEN
-    \ cr .noun
     ;
 
 ' do-tar IS tar  \ Resolve the deferred word
 
 : nock ( addr -- addr )  \ Main entry point
     tar ;
-
-init-mem-bounds
-
-\ Helper words for testing
-: mk-slot \ Creates slot formula [0 n]
-    0 make-atom
-    1 make-atom
-    make-cell ;
-
-: mk-constant
-    1 make-atom
-    42 make-atom
-    make-cell ;
-
-: mk-cell
-    3 make-atom
-    0 make-atom
-    1 make-atom
-    make-cell
-    make-cell ;
-
-: mk-inc  \ Creates increment formula [4 0 1]
-    4 make-atom
-    0 make-atom
-    1 make-atom
-    make-cell
-    make-cell ;
-
-: mk-eval  \ Creates  [2 [0 3] [1 [4 0 1]]
-    2 make-atom
-    0 make-atom
-    3 make-atom
-    make-cell
-    1 make-atom
-    mk-inc
-    make-cell
-    make-cell 
-    make-cell ;
-
-: mk-equal \ Creates [5 [4 0 2] [0 3]]
-    5 make-atom
-    4 make-atom
-    0 make-atom
-    2 make-atom
-    make-cell make-cell
-    0 make-atom
-    3 make-atom
-    make-cell
-    make-cell
-    make-cell ;
-
-
-
-\ Creates [[4 5] [6 14 15]]
-: test-noun
-    4 make-atom
-    5 make-atom
-    make-cell
-    6 make-atom
-    14 make-atom
-    15 make-atom
-    make-cell
-    make-cell
-    make-cell
-    ;
-    
-: test-slot
-    42 make-atom
-    0 make-atom
-    1 make-atom
-    make-cell
-    make-cell ;
-
-: test-eval
-    50 make-atom
-    51 make-atom
-    make-cell
-    mk-eval
-    make-cell ;
-
-: test-inc
-    test-noun
-    4 make-atom
-    0 make-atom
-    15 make-atom
-    make-cell
-    make-cell
-    make-cell ;
-
-: test-cell
-    42 make-atom
-    43 make-atom
-    make-cell
-    mk-cell
-    make-cell
-    ;
-
-: test-equal
-    50 make-atom
-    51 make-atom
-    make-cell
-    mk-equal
-    make-cell
-    ;
-
-: test-auto \ [50 [[0 1] [1 203]]]
-    50 make-atom
-    0 make-atom
-    1 make-atom
-    make-cell
-    1 make-atom
-    203 make-atom 
-    make-cell
-    make-cell
-    make-cell
-    ;
-
-: test-if \ [1 [6 [0 1] [0 1] [4 0 1]]]
-    1 make-atom
-    6 make-atom
-    0 make-atom
-    1 make-atom
-    make-cell
-    0 make-atom
-    1 make-atom
-    make-cell
-    4 make-atom
-    0 make-atom
-    1 make-atom
-    make-cell
-    make-cell
-    make-cell
-    make-cell
-    make-cell
-    make-cell ;
-
-
-: test-comp \ [42 [7 [4 0 1] [4 0 1]]]
-    42 make-atom
-    7 make-atom
-    4 make-atom
-    0 make-atom
-    1 make-atom
-    make-cell
-    make-cell
-    4 make-atom
-    0 make-atom
-    1 make-atom
-    make-cell
-    make-cell
-    make-cell
-    make-cell
-    make-cell ;
-
-: test-varadd \ [[67 39] [8 [0 3] [4 0 2]]]
-    67 make-atom
-    39 make-atom make-cell
-    8 make-atom
-    0 make-atom
-    3 make-atom
-    make-cell
-    4 make-atom
-    0 make-atom
-    2 make-atom
-    make-cell
-    make-cell
-    make-cell
-    make-cell
-    make-cell ;
-
-: test-core \ [45 [9 2 [1 4 0 3] 0 1]]
-    45 make-atom
-    9 make-atom
-    2 make-atom
-    1 make-atom
-    4 make-atom
-    0 make-atom
-    3 make-atom
-    make-cell make-cell make-cell
-    0 make-atom
-    1 make-atom make-cell
-    make-cell
-    make-cell
-    make-cell
-    make-cell
-    ;
-
-: test-replace \ [50 [10 [2 [0 1]] [1 8 9 10]]]
-    50 make-atom
-    10 make-atom
-    2 make-atom
-    0 make-atom
-    1 make-atom
-    make-cell
-    make-cell
-    1 make-atom
-    8 make-atom
-    9 make-atom
-    10 make-atom
-    make-cell
-    make-cell
-    make-cell
-    make-cell
-    make-cell
-    make-cell ;
-
-\ *[[*[a c] *[a d]] 0 3]
-
-: test-dynamic-hint \ [[50 51] [11 [369 [1 20]] 0 2]]
-    50 make-atom
-    51 make-atom
-    make-cell
-    11 make-atom
-    369 make-atom
-    1 make-atom
-    20 make-atom
-    make-cell
-    make-cell
-    0 make-atom
-    2 make-atom
-    make-cell
-    make-cell
-    make-cell
-    make-cell ;
-
-: test-static-hint \ [[50 51] [11 369 0 2]]
-    50 make-atom
-    51 make-atom
-    make-cell
-    11 make-atom
-    369 make-atom
-    0 make-atom
-    2 make-atom
-    make-cell
-    make-cell
-    make-cell
-    make-cell ;
-
-: eq
-    50 make-atom
-    51 make-atom
-    make-cell
-    50 make-atom
-    51 make-atom
-    make-cell ;
-
