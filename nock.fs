@@ -1,3 +1,22 @@
+\ Memory bounds checking utilities
+\ Maintains a record of allocated memory and provides validation
+
+VARIABLE mem-start  \ Start of our allocation space
+VARIABLE mem-end    \ End of our allocation space
+
+\ Initialize memory tracking
+: init-mem-bounds ( -- )
+    here mem-start !      \ Record starting point of our memory space
+    here 1000 cells +     \ Allocate reasonable buffer space
+    mem-end ! ;          \ Record ending point
+
+\ Check if address is within valid memory bounds
+: valid-addr? ( addr -- flag )
+    dup mem-start @ u>=   \ Check if address >= start
+    swap mem-end @ u<=    \ Check if address <= end
+    AND ;                \ Both conditions must be true
+
+
 \ Structure:
 \ First word: 0 for atom, 1 for cell
 \ Second word: For atoms: the value
@@ -113,6 +132,47 @@ DEFER slot  \ Forward declaration for recursion
 
 ' do-slot IS slot  \ Resolve the deferred word
 
+\ Replace operator (#) implementation
+DEFER hax  \ Forward declaration for recursion
+
+: do-hax ( n addr1 addr2 -- addr ) ( addr new-val target )
+    cr .S  cr
+    -rot ( addr2 n addr1 )
+    swap dup 1 = IF  \ Case #[1 a b]
+        drop nip  \ Return just a
+    ELSE 
+        dup 2 MOD 0= IF \ Even case #[(a + a) b c] -> #[a [b /[(a + a + 1) c]] c]
+            2/ >R  \ Store a
+            swap \ Get b on top
+            dup
+            R@ 
+            2* 1+ 
+            swap .noun slot  \ Calculate /[(a + a + 1) c]
+            dup valid-addr? INVERT IF
+                make-atom
+            THEN
+            rot swap make-cell  \ Create [b /[(a + a + 1) c]]
+            swap  \ Original c
+            R>    \ Restore a
+            -rot
+            hax  \ Recursive call
+        ELSE  \ Odd case #[(a + a + 1) b c] -> #[a [/[(a + a) c] b] c]
+            1- 2/ >R  \ Store a
+            swap   \ Get b
+            dup
+            R@ 2* swap slot \ Calculate /[(a + a) c]
+            rot    \ Get b back
+            make-cell  \ Create [/[(a + a) c] b]
+            swap  \ Original c
+            R>    \ Restore a
+            -rot
+            hax  \ Recursive call
+        THEN
+    THEN ;
+
+' do-hax IS hax  \ Resolve the deferred word
+
+
 \ * operator (tar) - main reduction engine
 DEFER tar  \ Forward declaration for recursion
 
@@ -175,10 +235,32 @@ DEFER tar  \ Forward declaration for recursion
     make-cell tar
     ;
 
-: nock-9 ( addr -- addr )  \ 
-    ;
+: nock-9 ( addr -- addr )  \ *[a 9 b c] -> *[*[a c] 2 [0 1] 0 b]
+    dup -rot
+    get-tail get-tail get-tail make-cell tar \ *[a c]
+    swap get-tail get-tail get-head >R \ store b
+    2 make-atom
+    0 make-atom
+    1 make-atom
+    make-cell
+    0 make-atom
+    R> \ restore b
+    make-cell make-cell make-cell make-cell
+    tar ;
 
-: nock-10 ( addr -- addr )  \ 
+: nock-10 ( addr -- addr )  \ *[a 10 [b c] d] -> #[b *[a c] *[a d]]
+    over \ Get a
+    over get-tail get-tail get-head \ Get [b c]
+    dup get-head >R  \ Store b
+    get-tail  \ Get c
+    make-cell tar \ *[a c]
+    >R
+    get-tail get-tail get-tail
+    make-cell tar \ *[a d]
+    R> R>  \ *[a d] *[a c] b 
+    get-value
+    -rot swap \ Stack: b *[a c] *[a d]
+    hax
     ;
 
 : nock-11 ( addr -- addr )  \ 
@@ -214,6 +296,8 @@ DEFER tar  \ Forward declaration for recursion
 
 : nock ( addr -- addr )  \ Main entry point
     tar ;
+
+init-mem-bounds
 
 \ Helper words for testing
 : mk-slot \ Creates slot formula [0 n]
@@ -376,6 +460,42 @@ DEFER tar  \ Forward declaration for recursion
     4 make-atom
     0 make-atom
     2 make-atom
+    make-cell
+    make-cell
+    make-cell
+    make-cell
+    make-cell ;
+
+: test-core \ [45 [9 2 [1 4 0 3] 0 1]]
+    45 make-atom
+    9 make-atom
+    2 make-atom
+    1 make-atom
+    4 make-atom
+    0 make-atom
+    3 make-atom
+    make-cell make-cell make-cell
+    0 make-atom
+    1 make-atom make-cell
+    make-cell
+    make-cell
+    make-cell
+    make-cell
+    ;
+
+: test-replace \ [50 [10 [2 [0 1]] [1 8 9 10]]]
+    50 make-atom
+    10 make-atom
+    2 make-atom
+    0 make-atom
+    1 make-atom
+    make-cell
+    make-cell
+    1 make-atom
+    8 make-atom
+    9 make-atom
+    10 make-atom
+    make-cell
     make-cell
     make-cell
     make-cell
