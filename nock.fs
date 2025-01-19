@@ -264,6 +264,28 @@ DEFER tar  \ Forward declaration for recursion
     ;
 
 : nock-11 ( addr -- addr )  \ 
+    \ Check if dynamic or static
+    dup get-tail get-tail get-head
+    is-cell? IF
+      \ Dynamic hint
+      2dup
+      get-tail get-tail get-head get-tail
+      make-cell tar \ *[a c]
+      -rot
+      get-tail get-tail get-tail
+      make-cell tar \ *[a d]
+      make-cell \ [*[a c] *[a d]]
+      0 make-atom
+      3 make-atom
+      make-cell
+      make-cell
+      tar
+    ELSE
+      \ Static hint
+      get-tail get-tail get-tail
+      make-cell
+      tar
+    THEN
     ;
 
 : do-tar ( addr -- addr )
@@ -497,6 +519,38 @@ init-mem-bounds
     10 make-atom
     make-cell
     make-cell
+    make-cell
+    make-cell
+    make-cell
+    make-cell ;
+
+\ *[[*[a c] *[a d]] 0 3]
+
+: test-dynamic-hint \ [[50 51] [11 [369 [1 20]] 0 2]]
+    50 make-atom
+    51 make-atom
+    make-cell
+    11 make-atom
+    369 make-atom
+    1 make-atom
+    20 make-atom
+    make-cell
+    make-cell
+    0 make-atom
+    2 make-atom
+    make-cell
+    make-cell
+    make-cell
+    make-cell ;
+
+: test-static-hint \ [[50 51] [11 369 0 2]]
+    50 make-atom
+    51 make-atom
+    make-cell
+    11 make-atom
+    369 make-atom
+    0 make-atom
+    2 make-atom
     make-cell
     make-cell
     make-cell
