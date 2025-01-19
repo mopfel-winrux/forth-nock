@@ -27,6 +27,12 @@ nock  ok 1
 .noun [50 203 ] ok 1
 ```
 
+## Todo
+
+[] Implement Large atoms using a bigint library
+[] Implement `+jam` and `+cue` in forth
+[] Implement a noun parser in forth `[1 2 3]` -> noun
+
 
 ## Nock 4k Specification
 ```
