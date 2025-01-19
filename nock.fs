@@ -54,7 +54,7 @@ DEFER .NOUN  \ Forward declaration
 : lus ( addr -- addr )
     dup is-cell? IF
         \ If cell, return as is
-        dup
+        cr .noun ABORT" Error incrementing cell "
     ELSE
         \ If atom, increment value
         get-value 1+ make-atom
