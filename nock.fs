@@ -156,7 +156,6 @@ DEFER tar  \ Forward declaration for recursion
     get-tail get-tail make-cell tar
     make-cell ;
 
-
 : nock-0 ( addr -- addr )  \ [a 0 b] -> /[1 + b]a
     get-tail get-tail get-value swap slot ;
 
