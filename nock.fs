@@ -1,3 +1,20 @@
+\ Complete Nock interpreter using bigints
+include big.fth  \ bigint library for atoms
+
+\ Big helper functions to get big from stack
+create num-buffer 32 chars allot
+
+: >big ( n -- addr )
+    s>d <# #s #>     \ Convert to string
+    make_big_number  \ Convert to bigint
+;
+
+\ Helper to compare operation number with bigint
+: op= ( addr n -- flag )
+    >big            \ Convert n to bigint
+    big= ;       \ Use tis (equality) and convert result
+
+
 \ Structure:
 \ First word: 0 for atom, 1 for cell
 \ Second word: For atoms: the value
@@ -10,14 +27,21 @@
     swap
     here >r          \ Save current position
     1 ,             \ Tag as cell (1)
-    , ,             \ Store tail and head
+    , ,             \ Store head and tail
     r> ;            \ Return address of cell
 
-: make-atom ( n -- addr )  \ Create an atom
+: make-atom-from-big 
     here >r         \ Save current position
     0 ,            \ Tag as atom (0)
-    ,              \ Store value
+    ,              \ Store bigint value
     r> ;           \ Return address of atom
+
+: make-atom ( n -- addr )  \ Create an atom using bigints
+    >big make-atom-from-big ;
+
+: make-atom-from-c ( <cccc> -- addr )  \ Create atom from Forth integer
+    big 
+    make-atom-from-big ;
 
 : is-cell? ( addr -- flag ) @ 1 = ;
 : get-value ( addr -- n ) field+ @ ;
@@ -36,7 +60,7 @@ DEFER .NOUN  \ Forward declaration
         ." ]"
     ELSE           \ If atom
         get-value    \ Get value
-        .          \ Print it
+        big.         \ Print using bigint printer
     THEN ;
 
 : .noun-with-dup ( addr -- addr )  \ Wrapper that ensures dup before printing
@@ -57,7 +81,7 @@ DEFER .NOUN  \ Forward declaration
         cr .noun ABORT" Error incrementing cell "
     ELSE
         \ If atom, increment value
-        get-value 1+ make-atom
+        get-value 1 >big big+ make-atom-from-big
     THEN ;
 
 \ = operator (tis) - equality test
@@ -80,7 +104,7 @@ DEFER tis-impl  \ Forward declaration for recursion
         THEN \ Heads were equal, now check tails
         get-tail swap get-tail tis-impl
     ELSE \ Both are atoms - compare values
-        get-value swap get-value = 0= IF 1 ELSE 0 THEN
+        get-value swap get-value big= IF 0 ELSE 1 THEN make-atom
     THEN ;
 
 ' do-tis IS tis-impl
@@ -93,18 +117,26 @@ DEFER slot  \ Forward declaration for recursion
 
 : do-slot ( n addr -- addr )
     swap                    \ Get n on top
-    dup 1 = IF             \ Case /1
+    get-value
+    dup 1 op= IF             \ Case /1
         drop
-    ELSE dup 2 = IF        \ Case /2
+    ELSE dup 2 op= IF        \ Case /2
         drop get-head
-    ELSE dup 3 = IF        \ Case /3
+    ELSE dup 3 op= IF        \ Case /3
         drop get-tail
     ELSE
         \ Handle deeper paths recursively
-        dup 2 MOD 0= IF    \ Even path
-            2/ swap slot 2 swap slot
+        dup  
+        2 >big bigmod 0 op= IF  \ Even path
+            2 >big 
+            big/ 
+            make-atom-from-big swap slot 
+            2 make-atom swap slot
         ELSE               \ Odd path
-            1- 2/ swap slot 3 swap slot
+            1 >big big- 
+            2 >big big/ 
+            make-atom-from-big swap slot 
+            3 make-atom swap slot
         THEN
     THEN THEN THEN ;
 
@@ -115,29 +147,31 @@ DEFER hax  \ Forward declaration for recursion
 
 : do-hax ( n addr1 addr2 -- addr ) ( addr new-val target )
     -rot ( addr2 n addr1 )
-    swap dup 1 = IF  \ Case #[1 a b]
+    swap dup 1 op= IF  \ Case #[1 a b]
         drop nip  \ Return just a
     ELSE 
-        dup 2 MOD 0= IF \ Even case #[(a + a) b c] -> #[a [b /[(a + a + 1) c]] c]
-            2/ >R  \ Store a
+        get-value
+        dup 2 >big bigmod 0 op= IF \ Even case #[(a + a) b c] -> #[a [b /[(a + a + 1) c]] c]
+            2 >big big/ >R  \ Store a
             swap \ Get b on top
             dup
-            R@ 2* 1+ 
-            swap .noun slot  \ Calculate /[(a + a + 1) c]
+            R@ 2 >big big* 1 >big big+ make-atom-from-big 
+            swap 
+            slot  \ Calculate /[(a + a + 1) c]
             rot swap make-cell  \ Create [b /[(a + a + 1) c]]
             swap  \ Original c
-            R>    \ Restore a
+            R> \ make-atom-from-big   \ Restore a
             -rot
             hax  \ Recursive call
         ELSE  \ Odd case #[(a + a + 1) b c] -> #[a [/[(a + a) c] b] c]
-            1- 2/ >R  \ Store a
+            get-value 1 >big big- 2 >big big/ >R  \ Store a
             swap   \ Get b
             dup
-            R@ 2* swap slot \ Calculate /[(a + a) c]
+            R@ 2 >big big* swap slot \ Calculate /[(a + a) c]
             rot    \ Get b back
             make-cell  \ Create [/[(a + a) c] b]
             swap  \ Original c
-            R>    \ Restore a
+            R> make-atom-from-big   \ Restore a
             -rot
             hax  \ Recursive call
         THEN
@@ -157,7 +191,7 @@ DEFER tar  \ Forward declaration for recursion
     make-cell ;
 
 : nock-0 ( addr -- addr )  \ [a 0 b] -> /[1 + b]a
-    get-tail get-tail get-value swap slot ;
+    get-tail get-tail swap slot ;
 
 : nock-1 ( addr -- addr )  \ [a 1 b] -> b
     swap drop
@@ -221,12 +255,14 @@ DEFER tar  \ Forward declaration for recursion
     over get-tail get-tail get-head \ Get [b c]
     dup get-head >R  \ Store b
     get-tail  \ Get c
-    make-cell tar \ *[a c]
+    make-cell 
+    tar \ *[a c]
     >R
     get-tail get-tail get-tail
-    make-cell tar \ *[a d]
+    make-cell 
+    tar \ *[a d]
     R> R>  \ *[a d] *[a c] b 
-    get-value -rot swap \ Stack: b *[a c] *[a d]
+    -rot swap \ Stack: b *[a c] *[a d]
     hax ; 
 
 : nock-11 ( addr -- addr )
@@ -254,24 +290,26 @@ DEFER tar  \ Forward declaration for recursion
     dup is-cell? IF  \ Check for Autocons
         drop autocons
     ELSE
-      get-value  \ Get operation number
-      swap dup get-head swap rot
-      CASE
-          0 OF nock-0 ENDOF
-          1 OF nock-1 ENDOF
-          2 OF nock-2 ENDOF
-          3 OF nock-3 ENDOF
-          4 OF nock-4 ENDOF
-          5 OF nock-5 ENDOF
-          6 OF nock-6 ENDOF
-          7 OF nock-7 ENDOF
-          8 OF nock-8 ENDOF
-          9 OF nock-9 ENDOF
-          10 OF nock-10 ENDOF
-          11 OF nock-11 ENDOF
-      ENDCASE 
-    THEN
-    ;
+        get-value    \ Get operation number (as bigint)
+        swap dup get-head swap rot \ Setup for operation
+        dup 0 op= IF 
+            drop nock-0
+        ELSE dup 1 op= IF drop nock-1
+        ELSE dup 2 op= IF drop nock-2
+        ELSE dup 3 op= IF drop nock-3
+        ELSE dup 4 op= IF drop nock-4
+        ELSE dup 5 op= IF drop nock-5
+        ELSE dup 6 op= IF drop nock-6
+        ELSE dup 7 op= IF drop nock-7
+        ELSE dup 8 op= IF drop nock-8
+        ELSE dup 9 op= IF drop nock-9
+        ELSE dup 10 op= IF drop nock-10
+        ELSE dup 11 op= IF drop nock-11
+        ELSE
+            cr .noun ABORT" Invalid operation number "
+        THEN THEN THEN THEN THEN THEN 
+        THEN THEN THEN THEN THEN THEN
+    THEN ;
 
 ' do-tar IS tar  \ Resolve the deferred word
 
