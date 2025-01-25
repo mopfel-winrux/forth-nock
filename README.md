@@ -29,7 +29,7 @@ nock  ok 1
 
 ## Todo
 
-- [ ] Implement Large atoms using a bigint library
+- [x] Implement Large atoms using a bigint library
 - [ ] Implement `+jam` and `+cue` in forth
 - [ ] Implement a noun parser in forth `[1 2 3]` -> noun
 - [ ] Keep hashcons map between formula and forth word (Frogwith's idea)
