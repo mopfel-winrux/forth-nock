@@ -1,317 +1,245 @@
-\ Complete Nock interpreter using bigints
-include big.fth  \ bigint library for atoms
+\ Nock interpreter in North Forth
 
-\ Big helper functions to get big from stack
-create num-buffer 32 chars allot
+\ ── Memory layout for nouns ──────────────────────────────────────────────
+\ Atoms:  [tag=0, value]          (2 cells)
+\ Cells:  [tag=1, head-addr, tail-addr]  (3 cells)
 
-: >big ( n -- addr )
-    s>d <# #s #>     \ Convert to string
-    make_big_number  \ Convert to bigint
-;
+: field+  ( addr -- addr' )  CELL+ ;   \ advance by one cell (cell size = 1)
 
-\ Helper to compare operation number with bigint
-: op= ( addr n -- flag )
-    >big            \ Convert n to bigint
-    big= ;       \ Use tis (equality) and convert result
+: make-cell  ( head tail -- addr )
+    SWAP
+    HERE >R
+    1 ,
+    , ,
+    R> ;
 
+: make-atom  ( n -- addr )
+    HERE >R
+    0 ,
+    ,
+    R> ;
 
-\ Structure:
-\ First word: 0 for atom, 1 for cell
-\ Second word: For atoms: the value
-\             For cells: pointer to head
-\ Third word: For cells: pointer to tail
+: is-cell?  ( addr -- flag )  @ 1 = IF 1 ELSE 0 THEN ;
+: get-value  ( addr -- n )    field+ @ ;
+: get-head   ( addr -- addr ) field+ @ ;
+: get-tail   ( addr -- addr ) field+ field+ @ ;
 
-: field+ ( addr -- addr' ) cell + ;  \ Move to next field
+DEFER .NOUN
 
-: make-cell ( head tail -- addr )  \ Create a cell from two nouns
-    swap
-    here >r          \ Save current position
-    1 ,             \ Tag as cell (1)
-    , ,             \ Store head and tail
-    r> ;            \ Return address of cell
-
-: make-atom-from-big 
-    here >r         \ Save current position
-    0 ,            \ Tag as atom (0)
-    ,              \ Store bigint value
-    r> ;           \ Return address of atom
-
-: make-atom ( n -- addr )  \ Create an atom using bigints
-    >big make-atom-from-big ;
-
-: make-atom-from-c ( <cccc> -- addr )  \ Create atom from Forth integer
-    big 
-    make-atom-from-big ;
-
-: is-cell? ( addr -- flag ) @ 1 = ;
-: get-value ( addr -- n ) field+ @ ;
-: get-head ( addr -- addr ) field+ @ ;
-: get-tail ( addr -- addr ) field+ field+ @ ; 
-
-DEFER .NOUN  \ Forward declaration
-
-: print-noun ( addr -- )  \ Print a noun
-    dup is-cell?    \ Check if cell
-    IF             \ If cell
-        ." ["
-        dup get-head RECURSE  \ Print head
-        ." " 
-        get-tail RECURSE  \ Print tail
-        ." ]"
-    ELSE           \ If atom
-        get-value    \ Get value
-        big.         \ Print using bigint printer
+: print-noun  ( addr -- )
+    dup is-cell?
+    IF
+        [CHAR] [ EMIT
+        dup get-head RECURSE
+        BL EMIT
+        get-tail RECURSE
+        [CHAR] ] EMIT  BL EMIT
+    ELSE
+        get-value .
     THEN ;
 
-: .noun-with-dup ( addr -- addr )  \ Wrapper that ensures dup before printing
-    dup print-noun ;
+: .noun-dup  ( addr -- addr )  dup print-noun ;
+' .noun-dup IS .NOUN
 
-' .noun-with-dup IS .NOUN  \ Resolve the deferred word to include dup
+\ ── Nock operators ───────────────────────────────────────────────────────
 
-\ === Begin Nock Implementation ===
-
-\ ? operator (wut) - checks if noun is atom
-: wut ( addr -- n )
+\ wut ?  — 0 if cell, 1 if atom
+: wut  ( addr -- n )
     is-cell? IF 0 ELSE 1 THEN ;
 
-\ + operator (lus) - increment atom
-: lus ( addr -- addr )
+\ lus +  — increment atom
+: lus  ( addr -- addr )
     dup is-cell? IF
-        \ If cell, return as is
-        cr .noun ABORT" Error incrementing cell "
+        CR .NOUN DROP 99 THROW
     ELSE
-        \ If atom, increment value
-        get-value 1 >big big+ make-atom-from-big
+        get-value 1+ make-atom
     THEN ;
 
-\ = operator (tis) - equality test
-DEFER tis-impl  \ Forward declaration for recursion
+\ tis =  — equality (0=equal, 1=not-equal); result is an atom-noun addr
+DEFER tis
 
-: do-tis ( addr1 addr2 -- n )
-    \ Check if both are cells or both are atoms
+: do-tis  ( addr1 addr2 -- addr )
     over is-cell? over is-cell? <> IF
-        2drop 1 EXIT  \ Different types, not equal
+        2drop 1 make-atom EXIT
     THEN
-
     over is-cell? IF
-        \ Both are cells - compare heads and tails
-        \ Keep copies for tail comparison
         2dup
-        \ Get and compare heads
-        2dup get-head swap get-head tis-impl
-        IF \ If heads not equal, clean up and return 1
-            2drop 2drop 1 EXIT
-        THEN \ Heads were equal, now check tails
-        get-tail swap get-tail tis-impl
-    ELSE \ Both are atoms - compare values
-        get-value swap get-value big= IF 0 ELSE 1 THEN make-atom
+        2dup get-head SWAP get-head tis
+        get-value 0 = IF
+            2drop get-tail SWAP get-tail tis
+        ELSE
+            2drop 2drop 1 make-atom
+        THEN
+    ELSE
+        get-value SWAP get-value = IF 0 ELSE 1 THEN make-atom
     THEN ;
 
-' do-tis IS tis-impl
+' do-tis IS tis
 
-: tis ( addr1 addr2 -- n )
-    tis-impl ;
+\ slot /  — tree addressing
+DEFER slot
 
-\ / operator (slot) - tree addressing
-DEFER slot  \ Forward declaration for recursion
-
-: do-slot ( n addr -- addr )
-    swap                    \ Get n on top
-    get-value
-    dup 1 op= IF             \ Case /1
+: do-slot  ( n-addr addr -- addr )
+    SWAP get-value
+    dup 1 = IF
         drop
-    ELSE dup 2 op= IF        \ Case /2
+    ELSE dup 2 = IF
         drop get-head
-    ELSE dup 3 op= IF        \ Case /3
+    ELSE dup 3 = IF
         drop get-tail
     ELSE
-        \ Handle deeper paths recursively
-        dup  
-        2 >big bigmod 0 op= IF  \ Even path
-            2 >big 
-            big/ 
-            make-atom-from-big swap slot 
-            2 make-atom swap slot
-        ELSE               \ Odd path
-            1 >big big- 
-            2 >big big/ 
-            make-atom-from-big swap slot 
-            3 make-atom swap slot
+        dup 2 MOD 0 = IF
+            2 / make-atom SWAP slot
+            2 make-atom SWAP slot
+        ELSE
+            1- 2 / make-atom SWAP slot
+            3 make-atom SWAP slot
         THEN
     THEN THEN THEN ;
 
-' do-slot IS slot  \ Resolve the deferred word
+' do-slot IS slot
 
-\ Replace operator (#) implementation
-DEFER hax  \ Forward declaration for recursion
+\ hax #  — replace at axis
+DEFER hax
 
-: do-hax ( n addr1 addr2 -- addr ) ( addr new-val target )
-    -rot ( addr2 n addr1 )
-    swap dup 1 op= IF  \ Case #[1 a b]
-        drop nip  \ Return just a
-    ELSE 
+: do-hax  ( n-addr new-val target -- addr )
+    -ROT SWAP
+    dup get-value 1 = IF
+        drop nip
+    ELSE
         get-value
-        dup 2 >big bigmod 0 op= IF \ Even case #[(a + a) b c] -> #[a [b /[(a + a + 1) c]] c]
-            2 >big big/ >R  \ Store a
-            swap \ Get b on top
-            dup
-            R@ 2 >big big* 1 >big big+ make-atom-from-big 
-            swap 
-            slot  \ Calculate /[(a + a + 1) c]
-            rot swap make-cell  \ Create [b /[(a + a + 1) c]]
-            swap  \ Original c
-            R> \ make-atom-from-big   \ Restore a
-            -rot
-            hax  \ Recursive call
-        ELSE  \ Odd case #[(a + a + 1) b c] -> #[a [/[(a + a) c] b] c]
-            get-value 1 >big big- 2 >big big/ >R  \ Store a
-            swap   \ Get b
-            dup
-            R@ 2 >big big* swap slot \ Calculate /[(a + a) c]
-            rot    \ Get b back
-            make-cell  \ Create [/[(a + a) c] b]
-            swap  \ Original c
-            R> make-atom-from-big   \ Restore a
-            -rot
-            hax  \ Recursive call
+        dup 2 MOD 0 = IF
+            2 / >R
+            SWAP dup
+            R@ 2 * 1+ make-atom SWAP slot
+            ROT SWAP make-cell
+            SWAP R>
+            make-atom -ROT
+            hax
+        ELSE
+            1- 2 / >R
+            SWAP dup
+            R@ 2 * make-atom SWAP slot
+            ROT make-cell
+            SWAP R>
+            make-atom -ROT
+            hax
         THEN
     THEN ;
 
-' do-hax IS hax  \ Resolve the deferred word
+' do-hax IS hax
 
+\ tar *  — main Nock reduction
+DEFER tar
 
-\ * operator (tar) - main reduction engine
-DEFER tar  \ Forward declaration for recursion
-
-: autocons ( addr -- addr) \ *[a [b c] d] -> [*[a b c] *[a d]]
-    dup dup get-head swap
-    get-tail get-head make-cell tar swap
-    dup get-head swap
-    get-tail get-tail make-cell tar
+: autocons  ( subject [b c] -- [*[a b] *[a c]] )
+    dup -ROT
+    dup get-head SWAP get-tail get-head make-cell tar
+    SWAP
+    dup get-head SWAP get-tail get-tail make-cell tar
     make-cell ;
 
-: nock-0 ( addr -- addr )  \ [a 0 b] -> /[1 + b]a
-    get-tail get-tail swap slot ;
+: nock-0  ( subject formula -- result )   \ [a 0 b] -> /[b a]
+    get-tail get-tail SWAP slot ;
 
-: nock-1 ( addr -- addr )  \ [a 1 b] -> b
-    swap drop
-    get-tail get-tail ;
+: nock-1  ( subject formula -- result )   \ [a 1 b] -> b
+    SWAP DROP get-tail get-tail ;
 
-: nock-2 ( addr -- addr )  \ [a 2 b c] -> *[*[a b] *[a c]]
-    dup get-tail get-tail get-head 
-    >R swap R> make-cell tar swap
-    dup get-head swap
+: nock-2  ( subject formula -- result )   \ [a 2 b c] -> *[*[a b] *[a c]]
+    dup get-tail get-tail get-head
+    >R SWAP R> make-cell tar SWAP
+    dup get-head SWAP
     get-tail get-tail get-tail make-cell tar
     make-cell tar ;
 
-: nock-3 ( addr -- addr )  \ [a 3 b] -> ?*[a b]
+: nock-3  ( subject formula -- result )   \ [a 3 b] -> ?*[a b]
     get-tail get-tail make-cell tar wut make-atom ;
 
-: nock-4 ( addr -- addr )  \ [a 4 b] -> +*[a b]
+: nock-4  ( subject formula -- result )   \ [a 4 b] -> +*[a b]
     get-tail get-tail make-cell tar lus ;
 
-: nock-5 ( addr -- addr )  \ [a 5 b] -> =*[a b]
+: nock-5  ( subject formula -- result )   \ [a 5 b c] -> =*[a b] =*[a c]
     get-tail get-tail make-cell tar
-    dup get-head
-    swap get-tail
-    tis make-atom ;
+    dup get-head SWAP get-tail
+    tis ;
 
-: nock-6 ( addr -- addr )  \ *[a 6 b c d] -> if *[a b] *[a c] else *[a d]
-    over over get-tail get-tail get-head make-cell tar \ *[a b]
-    get-value 0 = IF \ TODO: add check for cell and crash
-      get-tail get-tail get-tail get-head make-cell tar
-    ELSE  
-      get-tail get-tail get-tail get-tail make-cell tar
-    THEN    ;
-
-: nock-7 ( addr -- addr )  \ *[a 7 b c] -> *[*[a b] c]
-    dup -rot
-    get-tail get-tail get-head make-cell tar \ *[a b]
-    swap
-    get-tail get-tail get-tail make-cell tar ; \ *[*[a b] c]
-
-: nock-8 ( addr -- addr )  \ *[a 8 b c] -> *[[*[a b] a] c]
-    dup -rot
-    get-tail get-tail get-head make-cell tar \ *[a b]
-    over get-head make-cell \ [*[a b] a]
-    swap get-tail get-tail get-tail
-    make-cell tar ;
-
-: nock-9 ( addr -- addr )  \ *[a 9 b c] -> *[*[a c] 2 [0 1] 0 b]
-    dup -rot
-    get-tail get-tail get-tail make-cell tar \ *[a c]
-    swap get-tail get-tail get-head >R \ store b
-    2 make-atom
-    0 make-atom
-    1 make-atom
-    make-cell
-    0 make-atom
-    R> \ restore b
-    make-cell make-cell make-cell make-cell
-    tar ;
-
-: nock-10 ( addr -- addr )  \ *[a 10 [b c] d] -> #[b *[a c] *[a d]]
-    over \ Get a
-    over get-tail get-tail get-head \ Get [b c]
-    dup get-head >R  \ Store b
-    get-tail  \ Get c
-    make-cell 
-    tar \ *[a c]
-    >R
-    get-tail get-tail get-tail
-    make-cell 
-    tar \ *[a d]
-    R> R>  \ *[a d] *[a c] b 
-    -rot swap \ Stack: b *[a c] *[a d]
-    hax ; 
-
-: nock-11 ( addr -- addr )
-    dup get-tail get-tail get-head
-    is-cell? IF  \ Dynamic hint
-      2dup
-      get-tail get-tail get-head get-tail
-      make-cell tar \ *[a c]
-      -rot
-      get-tail get-tail get-tail
-      make-cell tar \ *[a d]
-      make-cell \ [*[a c] *[a d]]
-      0 make-atom
-      3 make-atom
-      make-cell
-      make-cell
-      tar
-    ELSE  \ Static hint
-      get-tail get-tail get-tail
-      make-cell tar
+: nock-6  ( subject formula -- result )   \ [a 6 b c d] -> if *[a b] then *[a c] else *[a d]
+    over over get-tail get-tail get-head make-cell tar
+    get-value 0 = IF
+        get-tail get-tail get-tail get-head make-cell tar
+    ELSE
+        get-tail get-tail get-tail get-tail make-cell tar
     THEN ;
 
-: do-tar ( addr -- addr )
-    dup get-tail get-head 
-    dup is-cell? IF  \ Check for Autocons
+: nock-7  ( subject formula -- result )   \ [a 7 b c] -> *[*[a b] c]
+    dup -ROT
+    get-tail get-tail get-head make-cell tar
+    SWAP get-tail get-tail get-tail make-cell tar ;
+
+: nock-8  ( subject formula -- result )   \ [a 8 b c] -> *[[*[a b] a] c]
+    dup -ROT
+    get-tail get-tail get-head make-cell tar
+    over get-head make-cell
+    SWAP get-tail get-tail get-tail
+    make-cell tar ;
+
+: nock-9  ( subject formula -- result )   \ [a 9 b c] -> *[*[a c] 2 [0 1] 0 b]
+    dup -ROT
+    get-tail get-tail get-tail make-cell tar
+    SWAP get-tail get-tail get-head >R
+    2 make-atom
+    0 make-atom 1 make-atom make-cell
+    0 make-atom R> make-cell
+    make-cell make-cell make-cell
+    tar ;
+
+: nock-10  ( subject formula -- result )  \ [a 10 [b c] d] -> #[b *[a c] *[a d]]
+    over
+    over get-tail get-tail get-head
+    dup get-head >R
+    get-tail make-cell tar
+    >R
+    get-tail get-tail get-tail make-cell tar
+    R> R> -ROT SWAP
+    hax ;
+
+: nock-11  ( subject formula -- result )  \ hint
+    dup get-tail get-tail get-head
+    is-cell? IF
+        2dup
+        get-tail get-tail get-head get-tail make-cell tar
+        -ROT
+        get-tail get-tail get-tail make-cell tar
+        make-cell 0 make-atom 3 make-atom make-cell make-cell tar
+    ELSE
+        get-tail get-tail get-tail make-cell tar
+    THEN ;
+
+: do-tar  ( addr -- addr )
+    dup get-tail get-head
+    dup is-cell? IF
         drop autocons
     ELSE
-        get-value    \ Get operation number (as bigint)
-        swap dup get-head swap rot \ Setup for operation
-        dup 0 op= IF 
-            drop nock-0
-        ELSE dup 1 op= IF drop nock-1
-        ELSE dup 2 op= IF drop nock-2
-        ELSE dup 3 op= IF drop nock-3
-        ELSE dup 4 op= IF drop nock-4
-        ELSE dup 5 op= IF drop nock-5
-        ELSE dup 6 op= IF drop nock-6
-        ELSE dup 7 op= IF drop nock-7
-        ELSE dup 8 op= IF drop nock-8
-        ELSE dup 9 op= IF drop nock-9
-        ELSE dup 10 op= IF drop nock-10
-        ELSE dup 11 op= IF drop nock-11
+        get-value
+        SWAP dup get-head SWAP ROT
+        dup 0 = IF  drop nock-0
+        ELSE dup 1 = IF  drop nock-1
+        ELSE dup 2 = IF  drop nock-2
+        ELSE dup 3 = IF  drop nock-3
+        ELSE dup 4 = IF  drop nock-4
+        ELSE dup 5 = IF  drop nock-5
+        ELSE dup 6 = IF  drop nock-6
+        ELSE dup 7 = IF  drop nock-7
+        ELSE dup 8 = IF  drop nock-8
+        ELSE dup 9 = IF  drop nock-9
+        ELSE dup 10 = IF  drop nock-10
+        ELSE dup 11 = IF  drop nock-11
         ELSE
-            cr .noun ABORT" Invalid operation number "
-        THEN THEN THEN THEN THEN THEN 
+            drop 2drop 98 THROW
+        THEN THEN THEN THEN THEN THEN
         THEN THEN THEN THEN THEN THEN
     THEN ;
 
-' do-tar IS tar  \ Resolve the deferred word
+' do-tar IS tar
 
-: nock ( addr -- addr )  \ Main entry point
-    tar ;
+: nock  ( addr -- addr )  tar ;
